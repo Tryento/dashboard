@@ -17,11 +17,10 @@ env_path = os.path.join(project_path, ".env", ".env")
 # -------------------------------------------------
 load_dotenv()
 
-def get_secret(key):
-    return st.secrets.get(key) or os.getenv(key)
+db = st.secrets["database"]
 
-user = get_secret("DB_USER")
-password = get_secret("DB_PASS")
+user = db["user"]
+password = db["password"]
 
 if not user or not password:
     st.error("Database credentials missing")
