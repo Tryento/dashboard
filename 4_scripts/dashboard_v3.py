@@ -22,7 +22,6 @@ def get_secret(key):
 
 user = get_secret("DB_USER")
 password = get_secret("DB_PASS")
-host = st.secrets["database"]["host"]
 
 if not user or not password:
     st.error("Database credentials missing")
