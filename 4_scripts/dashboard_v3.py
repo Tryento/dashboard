@@ -14,20 +14,16 @@ from dotenv import load_dotenv
 project_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 env_path = os.path.join(project_path, ".env", ".env")
 
-# -------------------------------------------------
-load_dotenv()
+load_dotenv(env_path)
+user = os.getenv("DB_USER")
+password = os.getenv("DB_PASS")
 
-db = st.secrets["database"]
-
-user = db["user"]
-password = db["password"]
-
-if not user or not password:
-    st.error("Database credentials missing")
-    st.stop()
+# URL-encode MongoDB credentials
+encoded_username = urllib.parse.quote_plus(user)
+encoded_password = urllib.parse.quote_plus(password)
 
 # MongoDB connection URI
-mongo_uri = f"mongodb+srv://{urllib.parse.quote_plus(user)}:{urllib.parse.quote_plus(password)}@cluster0.yrpctoh.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+mongo_uri = f"mongodb+srv://{encoded_username}:{encoded_password}@cluster0.yrpctoh.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 
 # --- Streamlit page settings ---
 st.title("Real-Time Environment Control Data Dashboard")
