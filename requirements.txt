@@ -1,0 +1,8 @@
+streamlit==1.46.0
+pandas
+numpy
+plotly
+pymongo
+python-dotenv
+altair
+requests
