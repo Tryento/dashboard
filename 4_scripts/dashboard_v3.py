@@ -85,6 +85,40 @@ try:
 
         # Per Cage Analysis
         if 'env_id' in df.columns:
+            st.subheader("🔥 Temperature and Humidity Over Time by Cage")
+            value_vars = [col for col in ["t", "h"] if col in df.columns]
+            if value_vars:
+                df_long = df.melt(
+                    id_vars=["ts", "env_id"],
+                    value_vars=value_vars,
+                    var_name="metric",
+                    value_name="value",
+                )
+                metric_labels = {"t": "Temperature (°C)", "h": "Humidity (%)"}
+                df_long["metric"] = df_long["metric"].map(metric_labels)
+
+                fig_cage = px.line(
+                    df_long,
+                    x="ts",
+                    y="value",
+                    color="env_id",
+                    facet_row="metric",
+                    title="Temperature and Humidity Over Time per Cage",
+                    labels={
+                        "ts": "Timestamp",
+                        "value": "Value",
+                        "env_id": "Cage",
+                        "metric": "Metric",
+                    },
+                )
+                fig_cage.update_layout(legend_title_text="Cage", height=700)
+                fig_cage.for_each_yaxis(
+                    lambda axis: axis.update(title_text=("Temperature (°C)" if "Temperature" in axis.title.text else "Humidity (%)"))
+                )
+                st.plotly_chart(fig_cage, use_container_width=True)
+            else:
+                st.warning("No temperature or humidity columns found for per cage analysis.")
+
             st.subheader("🔥 Temperature History by Cage")
             fig_temp = px.line(
                 df, x="ts", y="t", color="env_id",
