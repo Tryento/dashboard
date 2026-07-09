@@ -303,39 +303,6 @@ try:
     if mode == "General Analysis":
         st.subheader("📊 Sensor Readings Over Time" + (" by Cage" if color_arg else ""))
 
-        if group_cols:
-            # st.markdown renders straight into the page (unlike st.html, which
-            # sandboxes content in its own small iframe and breaks position:fixed/
-            # sticky since it has no awareness of the real page's scroll). Real
-            # position:sticky here means it sits in place until the user scrolls
-            # past it, then sticks to the top of the viewport.
-            legend_rows = "".join(
-                f'<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;'
-                f'margin-bottom:6px;background:{hex_to_rgba(cage_colors[c], 0.18)};'
-                f'border-left:5px solid {cage_colors[c]};border-radius:6px;">'
-                f'<span style="font-size:15px;">Cage {c}</span></div>'
-                for c in selected_cages
-            )
-            st.markdown(
-                f"""
-                <style>
-                .cage-legend-sticky {{
-                    position: sticky; top: 55px; z-index: 999;
-                    width: fit-content; margin: 0 0 16px auto;
-                    background: var(--secondary-background-color, #f0f2f6);
-                    border: 1px solid rgba(128,128,128,0.35); border-radius: 10px;
-                    padding: 12px 14px; box-shadow: 0 2px 10px rgba(0,0,0,0.15);
-                }}
-                </style>
-                <div class="cage-legend-sticky">
-                    <div style="font-weight:700;font-size:14px;margin-bottom:8px;
-                                text-transform:uppercase;letter-spacing:0.03em;">Cages</div>
-                    {legend_rows}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
         shown_metrics = numeric_selected + bool_selected
         labels = {col: metric_label(col, col in bool_cols, resolution) for col in shown_metrics}
         df_long = plot_df.melt(
