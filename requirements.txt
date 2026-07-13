@@ -1,8 +1,6 @@
 streamlit==1.46.0
-pandas
-numpy
-plotly
-pymongo
-python-dotenv
-altair
-requests
+pandas==2.3.3
+numpy==2.3.3
+plotly==6.8.0
+pymongo==4.16.0
+Pillow==11.3.0

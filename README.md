@@ -91,20 +91,41 @@ The dashboard evolved through three versions (`4_scripts/dashboard_v1.py` →
 `dashboard_v2.py` → `dashboard_v3.py`), moving from local `.env` file credentials to
 Streamlit's `secrets.toml` mechanism so it could be deployed on Streamlit Community
 Cloud. `dashboard_v3.py` is the current, actively developed version — `v1`/`v2` are kept
-for reference only. `3_notebooks/1_extract.ipynb` is the original notebook used to
-explore the MongoDB schema and connection before the dashboard existed.
+for reference only and are **not** guaranteed to run against the current
+`requirements.txt` (it's trimmed to just what `v3` needs). `3_notebooks/1_extract.ipynb`
+is the original notebook used to explore the MongoDB schema and connection before the
+dashboard existed.
+
+### Branding
+
+The app is styled black/green as a Tryento-branded tool rather than a default-looking
+Streamlit app:
+
+- `.streamlit/config.toml` sets the base dark theme (background, accent green, text
+  color) — this is Streamlit's official theming mechanism, so it applies consistently
+  whether run locally or on Streamlit Community Cloud.
+- `4_scripts/dashboard_v3.py` injects additional CSS on top (custom header, hidden
+  Streamlit menu/footer, styled metrics/buttons) and loads the icon mark from
+  `img/logo.png`, used both as the browser favicon and next to the "Tryento" text
+  wordmark in the page header. If that file is ever missing, it falls back to an emoji
+  favicon and a text-only wordmark — replace `img/logo.png` to update the branding, no
+  code changes needed.
 
 ## 2. Repository structure
 
 ```
 .
+├── .streamlit/
+│   └── config.toml          # Theme (dark + green) and server settings — safe to commit
+├── img/
+│   └── logo.png             # Tryento icon mark — used as favicon + header badge
 ├── 3_notebooks/
 │   └── 1_extract.ipynb      # Exploratory notebook: MongoDB connection + schema check
 ├── 4_scripts/
 │   ├── dashboard_v1.py      # Original version (local .env credentials) — reference only
 │   ├── dashboard_v2.py      # Second iteration — reference only
 │   └── dashboard_v3.py      # Current dashboard — run this one
-├── requirements.txt         # Python dependencies
+├── requirements.txt         # Python dependencies (for dashboard_v3.py)
 └── LICENSE
 ```
 
@@ -203,7 +224,88 @@ for cage in (1, 2, 3):
 records.insert_many(docs)
 ```
 
-## 5. Troubleshooting
+## 5. Production readiness
+
+Before launching this for company-wide use, note what's already in place and what's
+still worth deciding on:
+
+**Already handled:**
+- **Pinned dependencies** (`requirements.txt`) so a fresh deploy installs the exact
+  versions this was tested against, not whatever is newest that day.
+- **Fast failure on database issues**: the MongoDB client has an 8-second connection/
+  server-selection timeout, so an unreachable cluster surfaces an error in ~8s instead
+  of hanging for pymongo's default ~30s.
+- **No internal details leaked to end users**: unexpected errors show a plain, generic
+  message in the UI; the full exception (including anything that might reveal
+  connection details or query internals) is sent to the server-side log via Python's
+  `logging` module instead — visible in Streamlit Cloud's **"Manage app" → logs** panel,
+  not to whoever is looking at the dashboard.
+- **Caching** (`st.cache_resource` / `st.cache_data`) so normal use (switching modes,
+  filters, smoothing) doesn't repeatedly hit the database.
+- **Responsive layout**: multi-column sections (KPI cards, side-by-side pickers) wrap
+  onto multiple rows on narrow screens instead of squeezing into unreadable slivers, and
+  header/metric text scales down below 640px width.
+- **Secrets hygiene**: `.streamlit/secrets.toml` is gitignored; see the security note at
+  the end of this file if a credential is ever accidentally exposed.
+
+**Worth deciding before/at launch:**
+- **Who can access the app.** Streamlit Community Cloud apps are public by default (a
+  private-viewer allowlist is a paid feature). If this dashboard shouldn't be open to
+  anyone with the URL, that changes the hosting choice — see the note at the end of
+  section 6 below.
+- **MongoDB Atlas network access list.** Make sure the cluster's IP allowlist includes
+  `0.0.0.0/0` (or Streamlit Cloud's egress IPs specifically) — otherwise the deployed app
+  won't be able to reach the database even with correct credentials.
+- **Database user permissions.** The credentials in `secrets.toml` should be a
+  **read-only** MongoDB user scoped to just the `devices` database if possible, since
+  this app never needs to write data.
+- **Who owns the Streamlit Cloud account** the app is deployed under, and whether that's
+  a shared company account vs. a personal one someone might leave.
+
+## 6. Deploying (Streamlit Community Cloud)
+
+This app is a **Streamlit app**, not a static site — it needs a persistent Python
+process to serve it, so it can't run on static/serverless hosts like Netlify or Vercel.
+[Streamlit Community Cloud](https://streamlit.io/cloud) is the natural home for it: it's
+free, built specifically for Streamlit apps, and the app already targets it via
+`st.secrets`.
+
+1. **Push this repo to GitHub** (it already lives at
+   `github.com/Tryento/tryento-data-dash`, so this step may already be done — just make
+   sure your latest changes are pushed).
+2. Go to **[share.streamlit.io](https://share.streamlit.io)** and sign in with GitHub.
+3. Click **"New app"**, then pick:
+   - Repository: `Tryento/tryento-data-dash`
+   - Branch: whichever branch you want live (e.g. `main`)
+   - Main file path: `4_scripts/dashboard_v3.py`
+4. Before (or right after) deploying, open **"Advanced settings" → "Secrets"** and paste
+   in the same content as your local `.streamlit/secrets.toml`:
+   ```toml
+   [database]
+   user = "your_mongodb_username"
+   password = "your_mongodb_password"
+   host = "cluster0.yrpctoh.mongodb.net"
+   ```
+5. Click **Deploy**. Streamlit installs `requirements.txt` and starts the app — you'll
+   get a URL like `https://<your-app-name>.streamlit.app`.
+6. Any time you push new commits to the deployed branch, the app redeploys
+   automatically. Updating secrets later is done from the app's **Settings → Secrets**
+   panel in the Streamlit Cloud dashboard (never commit them to git).
+
+By default the deployed app is **public to anyone with the URL** — Streamlit Community
+Cloud's free tier doesn't support a private-viewer allowlist (that's a paid "Streamlit
+in Snowflake" / private-cloud feature). If this needs to stay internal to the company,
+options are: keep the URL unlisted and treat it like an unlisted doc (simplest, but not
+real access control), or move to a host that supports it — a container host (Render,
+Railway, Fly.io) behind a company VPN or with basic-auth in front, for example.
+
+A custom domain (instead of `*.streamlit.app`) also isn't available on the free tier.
+If either of those becomes a requirement, the alternative is a container host that keeps
+a persistent process running — e.g. Render, Railway, or Fly.io — which support custom
+domains and access control but need a bit more setup (a `Dockerfile` or
+platform-specific build config). Ask if you want help setting one of those up.
+
+## 7. Troubleshooting
 
 | Symptom | Likely cause |
 |---|---|

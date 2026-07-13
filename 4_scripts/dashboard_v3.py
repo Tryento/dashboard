@@ -1,13 +1,157 @@
+import base64
+import logging
+import os
+from string import Template
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from PIL import Image
 from datetime import datetime, timedelta
 import urllib.parse
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 from pymongo.server_api import ServerApi
 
-st.set_page_config(page_title="BSF Environment Dashboard", layout="wide")
+# --- Brand ------------------------------------------------------------------
+BRAND_GREEN = "#22C55E"
+BRAND_GREEN_DIM = "#15803D"
+BRAND_BLACK = "#0A0A0A"
+BRAND_PANEL = "#141C16"
+BRAND_TEXT = "#EAF7EC"
+BRAND_MUTED = "#9FB8A6"
+
+# Drop/replace the logo at this path and it's picked up automatically — no
+# code changes needed. Falls back to a text wordmark (and emoji favicon) until then.
+LOGO_PATH = os.path.join(os.path.dirname(__file__), "..", "img", "logo.png")
+HAS_LOGO = os.path.exists(LOGO_PATH)
+
+st.set_page_config(
+    page_title="Tryento | Environment Dashboard",
+    page_icon=Image.open(LOGO_PATH) if HAS_LOGO else "🪰",
+    layout="wide",
+)
+px.defaults.template = "plotly_dark"  # keep charts visually consistent with the dark theme
+
+# Built as a plain (non f-string) template rather than an f-string: Python
+# 3.12+'s tokenizer can misparse a big f-string mixing many escaped {{ }}
+# literal CSS braces with real {var} substitutions, which corrupts
+# inspect.getsource()'s block-finding for unrelated @st.cache_data functions
+# elsewhere in this file (surfaces as "tokenize.TokenError: EOF in
+# multi-line string"). string.Template's $-placeholders sidestep that
+# entirely since CSS's braces never need escaping.
+_THEME_CSS = Template("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'Inter', sans-serif;
+}
+
+/* Hide the "..." menu and Deploy button specifically, NOT the whole
+   toolbar — the sidebar's expand/collapse arrow also lives inside the
+   toolbar container, so hiding it wholesale removes the sidebar toggle. */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+[data-testid="stHeader"] { background: $BRAND_BLACK; }
+[data-testid="stAppDeployButton"] { display: none; }
+
+[data-testid="stSidebar"] {
+    background-color: $BRAND_PANEL;
+    border-right: 1px solid $BRAND_GREEN_DIM;
+}
+[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {
+    color: $BRAND_GREEN;
+}
+
+h1, h2, h3 { color: $BRAND_TEXT; letter-spacing: 0.02em; }
+
+[data-testid="stMetric"] {
+    background: $BRAND_PANEL;
+    border: 1px solid $BRAND_GREEN_DIM;
+    border-radius: 10px;
+    padding: 12px;
+}
+[data-testid="stMetricValue"] { color: $BRAND_GREEN; }
+[data-testid="stMetricLabel"] { color: $BRAND_MUTED; }
+
+.stButton>button, .stDownloadButton>button {
+    background-color: $BRAND_GREEN;
+    color: #061308;
+    border: none;
+    font-weight: 600;
+    border-radius: 6px;
+}
+.stButton>button:hover, .stDownloadButton>button:hover {
+    background-color: $BRAND_GREEN_DIM;
+    color: white;
+}
+
+.tryento-header {
+    display: flex; align-items: center; gap: 16px;
+    padding-bottom: 14px; margin-bottom: 20px;
+    border-bottom: 2px solid $BRAND_GREEN;
+}
+.tryento-header img { height: 46px; }
+.tryento-header .wordmark {
+    font-size: 30px; font-weight: 800; letter-spacing: 0.06em;
+    color: $BRAND_GREEN;
+}
+.tryento-header h1 {
+    font-size: 26px; font-weight: 800; margin: 0;
+    color: $BRAND_TEXT; letter-spacing: 0.01em;
+}
+.tryento-header p { margin: 0; color: $BRAND_MUTED; font-size: 14px; }
+
+/* Responsive: let multi-column layouts (KPI cards, side-by-side pickers)
+   wrap onto multiple rows instead of squeezing into unreadable slivers
+   on narrow viewports. Harmless on desktop since flex-wrap only kicks in
+   when content doesn't fit. */
+[data-testid="stHorizontalBlock"] {
+    flex-wrap: wrap;
+}
+[data-testid="stHorizontalBlock"] > div {
+    min-width: 220px;
+    flex: 1 1 220px;
+}
+
+@media (max-width: 640px) {
+    .tryento-header { flex-wrap: wrap; gap: 10px; padding-bottom: 10px; }
+    .tryento-header img { height: 34px; }
+    .tryento-header .wordmark { font-size: 22px; }
+    .tryento-header h1 { font-size: 18px; }
+    .tryento-header p { font-size: 12px; }
+    [data-testid="stMetricValue"] { font-size: 1.3rem; }
+    .cage-legend-sticky { position: static !important; margin: 0 0 12px 0 !important; width: 100% !important; }
+}
+</style>
+""")
+
+st.markdown(
+    _THEME_CSS.substitute(
+        BRAND_BLACK=BRAND_BLACK, BRAND_PANEL=BRAND_PANEL, BRAND_GREEN_DIM=BRAND_GREEN_DIM,
+        BRAND_GREEN=BRAND_GREEN, BRAND_TEXT=BRAND_TEXT, BRAND_MUTED=BRAND_MUTED,
+    ),
+    unsafe_allow_html=True,
+)
+
+# --- Branded header (shown even if credentials/connection fail below) ---
+if HAS_LOGO:
+    with open(LOGO_PATH, "rb") as f:
+        logo_b64 = base64.b64encode(f.read()).decode()
+    icon_html = f'<img src="data:image/png;base64,{logo_b64}" />'
+else:
+    icon_html = ""
+brand_mark = f'{icon_html}<span class="wordmark">TRYENTO</span>'
+
+st.markdown(f"""
+<div class="tryento-header">
+    {brand_mark}
+    <div>
+        <h1>Real-Time Environment Control Dashboard</h1>
+        <p>Black Soldier Fly farm monitoring &amp; research tool</p>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 # --- Get credentials from Streamlit secrets ---
 db_secrets = st.secrets.get("database", {})
@@ -25,9 +169,6 @@ encoded_password = urllib.parse.quote_plus(password)
 
 mongo_uri = f"mongodb+srv://{encoded_username}:{encoded_password}@{host}"
 
-# --- Streamlit page settings ---
-st.title("Real-Time Environment Control Data Dashboard")
-
 # --- Data processing helpers ---------------------------------------------
 
 # Columns that identify a record rather than measure something.
@@ -38,6 +179,13 @@ ID_COLUMNS = {"_id", "ts", "uid", "env_id", "env_type"}
 FRIENDLY_NAMES = {"t": "Temperature (°C)", "h": "Humidity (%)"}
 
 STALE_AFTER = timedelta(minutes=30)
+
+# Fail fast instead of hanging on pymongo's default ~30s server-selection
+# timeout when the cluster is unreachable.
+MONGO_TIMEOUT_MS = 8000
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 # Fixed palette so a cage always gets the same color everywhere (charts and
 # the floating legend), regardless of filtering or trace order.
@@ -151,7 +299,12 @@ def format_age(td):
 
 @st.cache_resource(show_spinner=False)
 def get_client(uri):
-    return MongoClient(uri, server_api=ServerApi('1'))
+    return MongoClient(
+        uri,
+        server_api=ServerApi('1'),
+        serverSelectionTimeoutMS=MONGO_TIMEOUT_MS,
+        connectTimeoutMS=MONGO_TIMEOUT_MS,
+    )
 
 
 @st.cache_data(ttl=300, show_spinner="Loading sensor data...")
@@ -302,6 +455,7 @@ try:
     # =====================================================================
     if mode == "General Analysis":
         st.subheader("📊 Sensor Readings Over Time" + (" by Cage" if color_arg else ""))
+
 
         shown_metrics = numeric_selected + bool_selected
         labels = {col: metric_label(col, col in bool_cols, resolution) for col in shown_metrics}
@@ -473,7 +627,15 @@ try:
         else:
             st.metric("Correlation (Pearson r)", f"{pair_corr:.2f}")
 
-except ConnectionFailure as e:
-    st.error(f"MongoDB connection failed: {e}")
-except Exception as e:
-    st.error(f"An error occurred: {e}")
+except ConnectionFailure:
+    logger.exception("MongoDB connection failed")
+    st.error(
+        "Couldn't reach the database right now. This is usually temporary — "
+        "please try again in a moment. If it persists, contact an administrator."
+    )
+except Exception:
+    # Full details go to the server-side log (visible in Streamlit Cloud's
+    # "Manage app" log viewer), not to the end user — avoids leaking
+    # internal details like hostnames or query shapes in a shared/company tool.
+    logger.exception("Unhandled error in dashboard_v3")
+    st.error("Something went wrong loading the dashboard. Please refresh, or contact an administrator if it continues.")
